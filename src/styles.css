@@ -446,6 +446,7 @@ button:disabled {
   padding: 10px;
   border-top: 1px solid var(--line);
   text-align: left;
+  vertical-align: top;
 }
 
 .prediction-table th {
@@ -488,6 +489,10 @@ button:disabled {
   min-width: 190px;
 }
 
+.team-cell.mini {
+  min-width: 0;
+}
+
 .team-cell img, .crest-fallback {
   width: 28px;
   height: 28px;
@@ -503,6 +508,36 @@ button:disabled {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 900;
+}
+
+.fixture-teams {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fixture-teams .versus {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.result-matrix {
+  min-width: 960px;
+}
+
+.result-matrix td:not(:first-child), .result-matrix th:not(:first-child) {
+  white-space: nowrap;
+}
+
+.result-matrix td .chip {
+  margin-top: 6px;
+  min-height: 30px;
+  padding: 5px 8px;
+}
+
+.history-table {
+  min-width: 680px;
 }
 
 .form-strip {

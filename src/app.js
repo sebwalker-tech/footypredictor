@@ -31,6 +31,7 @@ let currentView = "leaderboard";
 let selectedGameweekId = state.gameweeks.find(g => g.isActive)?.id ?? state.gameweeks[0]?.id;
 let leaderboardFilter = "overall";
 let selectedResultsGameweekId = null;
+let selectedHistoryGameweekId = null;
 let modal = null;
 let toastTimer = null;
 let syncInProgress = false;
@@ -286,6 +287,26 @@ function matchStatusLabel(status) {
     SUSPENDED: "Suspended",
     CANCELLED: "Cancelled"
   }[status] ?? status ?? "Pending";
+}
+
+function teamInfo(teamName) {
+  const normalised = normaliseTeamName(teamName);
+  return state.championshipTable.find(row => normaliseTeamName(row.teamName) === normalised);
+}
+
+function teamBadge(teamName) {
+  const info = teamInfo(teamName);
+  const initials = teamName.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join("").toUpperCase();
+  return `
+    <span class="team-cell mini">
+      ${info?.crest ? `<img src="${info.crest}" alt="" />` : `<span class="crest-fallback">${initials}</span>`}
+      <strong>${teamName}</strong>
+    </span>
+  `;
+}
+
+function fixtureTeams(fixture) {
+  return `<span class="fixture-teams">${teamBadge(fixture.homeTeam)}<span class="versus">v</span>${teamBadge(fixture.awayTeam)}</span>`;
 }
 
 async function fetchFootballData(path) {
@@ -623,7 +644,7 @@ function renderPredictionFixture(user, gameweek, fixture) {
   return `
     <article class="card fixture">
       <div class="teams">
-        <strong>${fixture.homeTeam} v ${fixture.awayTeam}</strong>
+        ${fixtureTeams(fixture)}
         <p class="muted">${fmtDate(fixture.kickoffAt)} · ${predictionDeadlineLabel(fixture)}</p>
         <div class="actions">
           <span class="chip ${locked ? "good" : "warn"}">${locked ? icon.lock : ""}${statusLabel}</span>
@@ -642,10 +663,12 @@ function renderPredictionFixture(user, gameweek, fixture) {
 }
 
 function renderResults() {
-  const gameweeks = state.gameweeks.filter(g => g.status !== "open" || state.fixtures.some(f => f.gameweekId === g.id && f.resultConfirmed));
+  const gameweeks = state.gameweeks.filter(g => state.fixtures.some(f => f.gameweekId === g.id));
   const ordered = [...gameweeks].sort((a, b) => b.number - a.number);
-  const selected = ordered.find(g => g.id === selectedResultsGameweekId) ?? ordered.find(g => state.fixtures.some(f => f.gameweekId === g.id && f.resultConfirmed)) ?? ordered[0];
+  const selected = ordered.find(g => g.id === selectedResultsGameweekId) ?? ordered[0];
   selectedResultsGameweekId = selected?.id ?? null;
+  const fixtures = state.fixtures.filter(f => f.gameweekId === selected?.id);
+  const players = [...state.users].sort((a, b) => a.fullName.localeCompare(b.fullName));
   return `
     <section class="section">
       ${selected ? `
@@ -663,35 +686,45 @@ function renderResults() {
             <div><strong>${selected.name}</strong><p class="muted">${selected.status}</p></div>
             <span class="chip ${selected.status === "completed" ? "good" : "warn"}">${selected.status}</span>
           </div>
-          ${state.fixtures.filter(f => f.gameweekId === selected.id).map(renderResultFixture).join("")}
+          <div class="table-card">
+            <table class="prediction-table result-matrix">
+              <thead>
+                <tr>
+                  <th>Fixture</th>
+                  <th>Actual</th>
+                  <th>Status</th>
+                  ${players.map(player => `<th>${player.fullName}</th>`).join("")}
+                </tr>
+              </thead>
+              <tbody>
+                ${fixtures.map(fixture => renderResultFixtureRow(fixture, players)).join("")}
+              </tbody>
+            </table>
+          </div>
         </div>
       ` : `<div class="card empty">No results have been confirmed yet.</div>`}
     </section>
   `;
 }
 
-function renderResultFixture(fixture) {
+function renderResultFixtureRow(fixture, players) {
   const score = fixture.resultConfirmed ? `${fixture.homeScore} - ${fixture.awayScore}` : "Pending";
-  const predictions = state.predictions.filter(p => p.fixtureId === fixture.id);
   return `
-    <details class="result-row">
-      <summary class="line-row">
-        <span>${fixture.homeTeam} v ${fixture.awayTeam}</span>
-        <span class="chip ${fixture.resultConfirmed ? "good" : "warn"}">${score} · ${matchStatusLabel(fixture.status)}</span>
-      </summary>
-      <table class="prediction-table">
-        <thead><tr><th>Player</th><th>Prediction</th><th>Points</th></tr></thead>
-        <tbody>
-          ${predictions.map(p => `
-            <tr>
-              <td>${state.users.find(u => u.id === p.userId)?.fullName}</td>
-              <td>${p.predictedHomeScore} - ${p.predictedAwayScore}</td>
-              <td><span class="chip ${p.pointsAwarded === 4 ? "good" : p.pointsAwarded === 1 ? "warn" : "bad"}">${p.pointsAwarded}${p.pointsAwarded === 4 ? " Exact Score" : ""}</span></td>
-            </tr>
-          `).join("") || `<tr><td colspan="3">No predictions</td></tr>`}
-        </tbody>
-      </table>
-    </details>
+    <tr>
+      <td>${fixtureTeams(fixture)}<p class="muted">${fmtDate(fixture.kickoffAt)}</p></td>
+      <td><span class="chip ${fixture.resultConfirmed ? "good" : "warn"}">${score}</span></td>
+      <td>${matchStatusLabel(fixture.status)}</td>
+      ${players.map(player => {
+        const prediction = state.predictions.find(p => p.userId === player.id && p.fixtureId === fixture.id);
+        if (!prediction) return `<td><span class="muted">-</span></td>`;
+        return `
+          <td>
+            <strong>${prediction.predictedHomeScore} - ${prediction.predictedAwayScore}</strong>
+            <span class="chip ${prediction.pointsAwarded === 4 ? "good" : prediction.pointsAwarded === 1 ? "warn" : "bad"}">${prediction.pointsAwarded}${prediction.pointsAwarded === 4 ? " Exact" : ""}</span>
+          </td>
+        `;
+      }).join("")}
+    </tr>
   `;
 }
 
@@ -754,6 +787,10 @@ function renderHistory(user) {
   const exacts = predictions.filter(p => p.pointsAwarded === 4).length;
   const correct = predictions.filter(p => p.pointsAwarded === 1).length;
   const playedWeeks = new Set(predictions.map(p => p.gameweekId)).size || 1;
+  const gameweeks = state.gameweeks.filter(g => state.fixtures.some(f => f.gameweekId === g.id));
+  const selected = gameweeks.find(g => g.id === selectedHistoryGameweekId) ?? gameweeks.find(g => g.isActive) ?? gameweeks[0];
+  selectedHistoryGameweekId = selected?.id ?? null;
+  const fixtures = state.fixtures.filter(f => f.gameweekId === selected?.id);
   return `
     <section class="section">
       <div class="grid">
@@ -762,16 +799,39 @@ function renderHistory(user) {
         ${statCard("Correct results", correct)}
         ${statCard("Avg per gameweek", (user.totalPoints / playedWeeks).toFixed(1))}
       </div>
-      ${predictions.length ? predictions.map(p => {
-        const f = state.fixtures.find(item => item.id === p.fixtureId);
-        return `
-          <article class="card history-row">
-            <div class="line-row"><strong>${gameweekName(p.gameweekId)}</strong><span class="chip ${p.pointsAwarded === 4 ? "good" : p.pointsAwarded === 1 ? "warn" : "bad"}">${p.pointsAwarded} pts</span></div>
-            <div>${f.homeTeam} v ${f.awayTeam}</div>
-            <p class="muted">Predicted ${p.predictedHomeScore} - ${p.predictedAwayScore} · Actual ${f.resultConfirmed ? `${f.homeScore} - ${f.awayScore}` : "pending"}</p>
-          </article>
-        `;
-      }).join("") : `<div class="card empty">Your predictions will appear here after you save them.</div>`}
+      ${selected ? `
+        <div class="toolbar">
+          <div class="gameweek-picker compact">
+            <label>History gameweek
+              <select onchange="setSelectedHistoryGameweek(this.value)">
+                ${gameweeks.map(g => `<option value="${g.id}" ${selectedHistoryGameweekId === g.id ? "selected" : ""}>${g.name}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <span class="chip good">${fixtures.reduce((sum, fixture) => {
+            const prediction = predictions.find(p => p.fixtureId === fixture.id);
+            return sum + (prediction?.pointsAwarded ?? 0);
+          }, 0)} pts</span>
+        </div>
+        <div class="card table-card">
+          <table class="prediction-table history-table">
+            <thead><tr><th>Fixture</th><th>Prediction</th><th>Actual</th><th>Points</th></tr></thead>
+            <tbody>
+              ${fixtures.map(fixture => {
+                const prediction = predictions.find(p => p.fixtureId === fixture.id);
+                return `
+                  <tr>
+                    <td>${fixtureTeams(fixture)}<p class="muted">${fmtDate(fixture.kickoffAt)}</p></td>
+                    <td>${prediction ? `${prediction.predictedHomeScore} - ${prediction.predictedAwayScore}` : `<span class="muted">No prediction</span>`}</td>
+                    <td>${fixture.resultConfirmed ? `${fixture.homeScore} - ${fixture.awayScore}` : `<span class="muted">Pending</span>`}</td>
+                    <td>${prediction ? `<span class="chip ${prediction.pointsAwarded === 4 ? "good" : prediction.pointsAwarded === 1 ? "warn" : "bad"}">${prediction.pointsAwarded}${prediction.pointsAwarded === 4 ? " Exact Score" : ""}</span>` : `<span class="muted">-</span>`}</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      ` : `<div class="card empty">Your predictions will appear here after you save them.</div>`}
     </section>
   `;
 }
@@ -792,7 +852,7 @@ function renderAdminFixtureOverride(fixture, gameweekId) {
     <div class="card card-pad">
       <div class="line-row">
         <div>
-          <strong>${fixture.homeTeam} v ${fixture.awayTeam}</strong>
+          ${fixtureTeams(fixture)}
           <p class="muted">${matchStatusLabel(fixture.status)} · ${fixture.resultConfirmed ? `${fixture.homeScore} - ${fixture.awayScore}` : "awaiting API result"}</p>
         </div>
         <span class="chip ${fixture.apiMatchId ? "good" : "warn"}">${fixture.apiMatchId ? "API linked" : "Not linked"}</span>
@@ -930,6 +990,7 @@ window.setView = setView;
 window.setLeaderboardFilter = filter => { leaderboardFilter = filter; render(); };
 window.setSelectedGameweek = id => { selectedGameweekId = id; render(); };
 window.setSelectedResultsGameweek = id => { selectedResultsGameweekId = id; render(); };
+window.setSelectedHistoryGameweek = id => { selectedHistoryGameweekId = id; render(); };
 
 window.savePrediction = fixtureId => {
   const fixture = state.fixtures.find(f => f.id === fixtureId);
@@ -959,8 +1020,8 @@ window.openPlayer = userId => {
   const user = state.users.find(u => u.id === userId);
   const rows = state.predictions.filter(p => p.userId === userId).map(p => {
     const f = state.fixtures.find(item => item.id === p.fixtureId);
-    return `<tr><td>${gameweekName(p.gameweekId)}</td><td>${f.homeTeam} v ${f.awayTeam}</td><td>${p.predictedHomeScore} - ${p.predictedAwayScore}</td><td>${f.resultConfirmed ? `${f.homeScore} - ${f.awayScore}` : "Pending"}</td><td>${p.pointsAwarded}</td></tr>`;
-  }).join("");
+    return `<tr><td>${gameweekName(p.gameweekId)}</td><td>${fixtureTeams(f)}</td><td>${p.predictedHomeScore} - ${p.predictedAwayScore}</td><td>${f.resultConfirmed ? `${f.homeScore} - ${f.awayScore}` : "Pending"}</td><td>${p.pointsAwarded}</td></tr>`;
+      }).join("");
   const weekly = state.gameweeks.map(g => {
     const pts = state.predictions.filter(p => p.userId === userId && p.gameweekId === g.id).reduce((sum, p) => sum + p.pointsAwarded, 0);
     return `<span class="chip">${g.name}: ${pts} pts</span>`;

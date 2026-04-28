@@ -262,6 +262,17 @@ button:disabled {
   width: 100%;
 }
 
+.gameweek-picker.compact {
+  min-width: min(360px, 100%);
+}
+
+.gameweek-picker.compact label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .gameweek-list {
   max-height: 260px;
   overflow: auto;

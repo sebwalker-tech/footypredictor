@@ -30,6 +30,7 @@ let currentUserId = state.sessionUserId;
 let currentView = "leaderboard";
 let selectedGameweekId = state.gameweeks.find(g => g.isActive)?.id ?? state.gameweeks[0]?.id;
 let leaderboardFilter = "overall";
+let selectedResultsGameweekId = null;
 let modal = null;
 let toastTimer = null;
 let syncInProgress = false;
@@ -219,7 +220,7 @@ function lockPastKickoffs(target) {
   const now = Date.now();
   target.predictions.forEach(prediction => {
     const fixture = target.fixtures.find(f => f.id === prediction.fixtureId);
-    if (fixture && Date.parse(fixture.kickoffAt) <= now && !prediction.isLocked) {
+    if (fixture && predictionDeadline(fixture) <= now && !prediction.isLocked) {
       prediction.isLocked = true;
       prediction.lockedAt = new Date().toISOString();
     }
@@ -227,10 +228,10 @@ function lockPastKickoffs(target) {
 }
 
 function canEditPrediction(gameweek, fixture, prediction) {
-  if (Date.parse(fixture.kickoffAt) <= Date.now()) return false;
+  if (!fixture || fixture.resultConfirmed) return false;
+  if (predictionDeadline(fixture) <= Date.now()) return false;
   if (gameweek.status === "completed") return false;
-  if (Date.parse(gameweek.closesAt) <= Date.now() && Date.parse(fixture.kickoffAt) <= Date.now()) return false;
-  return !prediction?.isLocked;
+  return true;
 }
 
 function apiHeaders() {
@@ -405,13 +406,17 @@ function fmtDate(value) {
   return new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
-function kickoffCountdown(value) {
-  const diff = Date.parse(value) - Date.now();
-  if (diff <= 0) return "Locked";
+function predictionDeadline(fixture) {
+  return Date.parse(fixture.kickoffAt) - 3600000;
+}
+
+function predictionDeadlineLabel(fixture) {
+  const diff = predictionDeadline(fixture) - Date.now();
+  if (diff <= 0) return "Prediction closed";
   const hours = Math.floor(diff / 3600000);
   const minutes = Math.floor((diff % 3600000) / 60000);
-  if (hours > 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
-  return `${hours}h ${minutes}m`;
+  if (hours > 24) return `${Math.floor(hours / 24)}d ${hours % 24}h left to predict`;
+  return `${hours}h ${minutes}m left to predict`;
 }
 
 function showToast(message) {
@@ -508,7 +513,7 @@ function renderShell(user) {
           <header class="topbar">
             <div>
               <h2>${title}</h2>
-              <p class="muted">${state.apiSettings.lastSyncAt ? `Live data last synced ${fmtDate(state.apiSettings.lastSyncAt)}.` : "Scores lock at kickoff. Exact scores earn 4 points, correct outcomes earn 1."}</p>
+              <p class="muted">${state.apiSettings.lastSyncAt ? `Live data last synced ${fmtDate(state.apiSettings.lastSyncAt)}.` : "Predictions stay editable until 1 hour before kickoff. Exact scores earn 4 points, correct outcomes earn 1."}</p>
             </div>
             <div class="actions">
               <button class="secondary" onclick="syncFromApi()">${icon.sync} Sync Scores</button>
@@ -574,18 +579,10 @@ function renderLeaderboard() {
             <option value="overall" ${leaderboardFilter === "overall" ? "selected" : ""}>Overall</option>
             ${state.gameweeks.map(g => `<option value="${g.id}" ${leaderboardFilter === g.id ? "selected" : ""}>${g.name}</option>`).join("")}
           </select>
-          <div class="gameweek-list">
-            <button class="${leaderboardFilter === "overall" ? "active" : ""}" onclick="setLeaderboardFilter('overall')">Overall</button>
-            ${state.gameweeks.map(g => `<button class="${leaderboardFilter === g.id ? "active" : ""}" onclick="setLeaderboardFilter('${g.id}')"><span>${g.name}</span><small>${gameweekPointsTotal(g.id)} pts</small></button>`).join("")}
-          </div>
         </aside>
       </div>
     </section>
   `;
-}
-
-function gameweekPointsTotal(gameweekId) {
-  return state.predictions.filter(p => p.gameweekId === gameweekId).reduce((sum, p) => sum + p.pointsAwarded, 0);
 }
 
 function recentForm(userId) {
@@ -601,14 +598,17 @@ function renderPredictions(user) {
   const selected = state.gameweeks.find(g => g.id === selectedGameweekId) ?? selectableGameweeks[0] ?? state.gameweeks[0];
   selectedGameweekId = selected?.id;
   const fixtures = state.fixtures.filter(f => f.gameweekId === selected?.id);
-  const hasEditableFixture = fixtures.some(fixture => canEditPrediction(selected, fixture, state.predictions.find(p => p.userId === user.id && p.fixtureId === fixture.id)));
   return `
     <section class="section">
       <div class="toolbar">
-        <div class="tabs">
-          ${selectableGameweeks.map(g => `<button class="tab ${selectedGameweekId === g.id ? "active" : ""}" onclick="setSelectedGameweek('${g.id}')">${g.name}</button>`).join("")}
+        <div class="gameweek-picker compact">
+          <label>Gameweek
+            <select onchange="setSelectedGameweek(this.value)">
+              ${selectableGameweeks.map(g => `<option value="${g.id}" ${selectedGameweekId === g.id ? "selected" : ""}>${g.name}</option>`).join("")}
+            </select>
+          </label>
         </div>
-        <button class="primary" onclick="submitAll('${selectedGameweekId}')" ${hasEditableFixture ? "" : "disabled"}>Submit All</button>
+        <span class="chip warn">Auto-saves until 1 hour before kickoff</span>
       </div>
       ${fixtures.length ? fixtures.map(f => renderPredictionFixture(user, selected, f)).join("") : `<div class="card empty">No fixtures available yet.</div>`}
     </section>
@@ -619,24 +619,23 @@ function renderPredictionFixture(user, gameweek, fixture) {
   const prediction = state.predictions.find(p => p.userId === user.id && p.fixtureId === fixture.id);
   const editable = canEditPrediction(gameweek, fixture, prediction);
   const locked = !editable;
+  const statusLabel = editable ? "Open" : prediction ? "Prediction set" : "Closed";
   return `
     <article class="card fixture">
       <div class="teams">
         <strong>${fixture.homeTeam} v ${fixture.awayTeam}</strong>
-        <p class="muted">${fmtDate(fixture.kickoffAt)} · ${kickoffCountdown(fixture.kickoffAt)} to kickoff</p>
+        <p class="muted">${fmtDate(fixture.kickoffAt)} · ${predictionDeadlineLabel(fixture)}</p>
         <div class="actions">
-          <span class="chip ${locked ? "good" : "warn"}">${locked ? icon.lock : ""}${locked ? "Locked" : "Open"}</span>
+          <span class="chip ${locked ? "good" : "warn"}">${locked ? icon.lock : ""}${statusLabel}</span>
           <span class="chip">${gameweek.status}</span>
         </div>
       </div>
       <div class="actions">
         <div class="score-inputs">
-          <input id="home-${fixture.id}" type="number" min="0" max="20" value="${prediction?.predictedHomeScore ?? ""}" ${editable ? "" : "disabled"} />
+          <input id="home-${fixture.id}" type="number" min="0" max="20" value="${prediction?.predictedHomeScore ?? ""}" onchange="savePrediction('${fixture.id}')" ${editable ? "" : "disabled"} />
           <strong>-</strong>
-          <input id="away-${fixture.id}" type="number" min="0" max="20" value="${prediction?.predictedAwayScore ?? ""}" ${editable ? "" : "disabled"} />
+          <input id="away-${fixture.id}" type="number" min="0" max="20" value="${prediction?.predictedAwayScore ?? ""}" onchange="savePrediction('${fixture.id}')" ${editable ? "" : "disabled"} />
         </div>
-        <button class="secondary" onclick="savePrediction('${fixture.id}', false)" ${editable ? "" : "disabled"}>Save</button>
-        <button class="primary" onclick="savePrediction('${fixture.id}', true)" ${editable ? "" : "disabled"}>Lock In</button>
       </div>
     </article>
   `;
@@ -644,17 +643,29 @@ function renderPredictionFixture(user, gameweek, fixture) {
 
 function renderResults() {
   const gameweeks = state.gameweeks.filter(g => g.status !== "open" || state.fixtures.some(f => f.gameweekId === g.id && f.resultConfirmed));
+  const ordered = [...gameweeks].sort((a, b) => b.number - a.number);
+  const selected = ordered.find(g => g.id === selectedResultsGameweekId) ?? ordered.find(g => state.fixtures.some(f => f.gameweekId === g.id && f.resultConfirmed)) ?? ordered[0];
+  selectedResultsGameweekId = selected?.id ?? null;
   return `
     <section class="section">
-      ${gameweeks.map(g => `
+      ${selected ? `
+        <div class="toolbar">
+          <div class="gameweek-picker compact">
+            <label>Results gameweek
+              <select onchange="setSelectedResultsGameweek(this.value)">
+                ${ordered.map(g => `<option value="${g.id}" ${selectedResultsGameweekId === g.id ? "selected" : ""}>${g.name}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+        </div>
         <div class="card card-pad">
           <div class="line-row">
-            <div><strong>${g.name}</strong><p class="muted">${g.status}</p></div>
-            <span class="chip ${g.status === "completed" ? "good" : "warn"}">${g.status}</span>
+            <div><strong>${selected.name}</strong><p class="muted">${selected.status}</p></div>
+            <span class="chip ${selected.status === "completed" ? "good" : "warn"}">${selected.status}</span>
           </div>
-          ${state.fixtures.filter(f => f.gameweekId === g.id).map(renderResultFixture).join("")}
+          ${state.fixtures.filter(f => f.gameweekId === selected.id).map(renderResultFixture).join("")}
         </div>
-      `).join("") || `<div class="card empty">No results have been confirmed yet.</div>`}
+      ` : `<div class="card empty">No results have been confirmed yet.</div>`}
     </section>
   `;
 }
@@ -840,9 +851,8 @@ function renderAdmin() {
         <div class="line-row">
           <div>
             <strong>Gameweeks</strong>
-            <p class="muted">Results update from the API automatically. Manual score entry is now only an override.</p>
+            <p class="muted">Gameweeks and fixtures come from the API. Manual score entry is only an override.</p>
           </div>
-          <button class="primary" onclick="addGameweek()">Add gameweek</button>
         </div>
         ${state.gameweeks.map(g => `
           <div class="admin-row">
@@ -853,7 +863,6 @@ function renderAdmin() {
                   ${["open", "closed", "completed"].map(s => `<option ${g.status === s ? "selected" : ""}>${s}</option>`).join("")}
                 </select>
                 <button class="secondary" onclick="setActiveGameweek('${g.id}')">${g.isActive ? "Active" : "Mark Active"}</button>
-                <button class="ghost" onclick="addFixture('${g.id}')">Add Fixture</button>
                 <button class="danger" onclick="deleteGameweek('${g.id}')">Delete</button>
               </div>
             </div>
@@ -920,53 +929,29 @@ window.logout = () => {
 window.setView = setView;
 window.setLeaderboardFilter = filter => { leaderboardFilter = filter; render(); };
 window.setSelectedGameweek = id => { selectedGameweekId = id; render(); };
+window.setSelectedResultsGameweek = id => { selectedResultsGameweekId = id; render(); };
 
-window.savePrediction = (fixtureId, lock) => {
+window.savePrediction = fixtureId => {
   const fixture = state.fixtures.find(f => f.id === fixtureId);
   const gameweek = state.gameweeks.find(g => g.id === fixture.gameweekId);
   let prediction = state.predictions.find(p => p.userId === currentUserId && p.fixtureId === fixtureId);
-  if (!canEditPrediction(gameweek, fixture, prediction)) return alert("This fixture is locked.");
-  const home = Number(document.getElementById(`home-${fixtureId}`).value);
-  const away = Number(document.getElementById(`away-${fixtureId}`).value);
+  if (!canEditPrediction(gameweek, fixture, prediction)) return alert("Predictions for this fixture are closed.");
+  const homeValue = document.getElementById(`home-${fixtureId}`).value;
+  const awayValue = document.getElementById(`away-${fixtureId}`).value;
+  if (homeValue === "" || awayValue === "") return;
+  const home = Number(homeValue);
+  const away = Number(awayValue);
   if (!Number.isInteger(home) || !Number.isInteger(away) || home < 0 || away < 0) return alert("Enter both scores.");
-  if (lock && !confirm("Lock this prediction? You cannot edit it afterwards.")) return;
   if (!prediction) {
     prediction = { id: uid("p"), userId: currentUserId, fixtureId, gameweekId: fixture.gameweekId, predictedHomeScore: home, predictedAwayScore: away, isLocked: false, lockedAt: null, pointsAwarded: 0, createdAt: new Date().toISOString() };
     state.predictions.push(prediction);
   }
   prediction.predictedHomeScore = home;
   prediction.predictedAwayScore = away;
-  prediction.isLocked = lock || prediction.isLocked;
-  prediction.lockedAt = prediction.isLocked ? new Date().toISOString() : null;
+  prediction.isLocked = false;
+  prediction.lockedAt = null;
   persist();
-  showToast(lock ? "Prediction locked" : "Prediction saved");
-  render();
-};
-
-window.submitAll = gameweekId => {
-  const fixtures = state.fixtures.filter(f => f.gameweekId === gameweekId);
-  const ready = fixtures.map(f => {
-    const gameweek = state.gameweeks.find(g => g.id === f.gameweekId);
-    const prediction = state.predictions.find(p => p.userId === currentUserId && p.fixtureId === f.id);
-    const homeEl = document.getElementById(`home-${f.id}`);
-    const awayEl = document.getElementById(`away-${f.id}`);
-    return { fixture: f, prediction, editable: canEditPrediction(gameweek, f, prediction), home: Number(homeEl?.value), away: Number(awayEl?.value), hasScores: homeEl?.value !== "" && awayEl?.value !== "" };
-  }).filter(item => item.editable && item.hasScores && Number.isInteger(item.home) && Number.isInteger(item.away) && item.home >= 0 && item.away >= 0);
-  if (!ready.length) return alert("No unlocked completed predictions to submit.");
-  if (!confirm("Lock all completed predictions for this gameweek?")) return;
-  ready.forEach(item => {
-    let prediction = item.prediction;
-    if (!prediction) {
-      prediction = { id: uid("p"), userId: currentUserId, fixtureId: item.fixture.id, gameweekId: item.fixture.gameweekId, predictedHomeScore: item.home, predictedAwayScore: item.away, isLocked: false, lockedAt: null, pointsAwarded: 0, createdAt: new Date().toISOString() };
-      state.predictions.push(prediction);
-    }
-    prediction.predictedHomeScore = item.home;
-    prediction.predictedAwayScore = item.away;
-    prediction.isLocked = true;
-    prediction.lockedAt = new Date().toISOString();
-  });
-  persist();
-  showToast("Gameweek predictions locked");
+  showToast("Prediction saved");
   render();
 };
 
@@ -993,12 +978,6 @@ window.openPlayer = userId => {
 
 window.closeModal = () => { modal = null; render(); };
 
-window.addGameweek = () => {
-  const number = state.gameweeks.length + 1;
-  state.gameweeks.push({ id: uid("gw"), name: `Gameweek ${number}`, number, season: "2026/27", opensAt: new Date().toISOString(), closesAt: nowISO(168), status: "open", isActive: false, createdAt: new Date().toISOString() });
-  persist(); render();
-};
-
 window.updateGameweekStatus = (id, status) => {
   const gw = state.gameweeks.find(g => g.id === id);
   gw.status = status;
@@ -1017,14 +996,6 @@ window.deleteGameweek = id => {
   state.gameweeks = state.gameweeks.filter(g => g.id !== id);
   state.fixtures = state.fixtures.filter(f => f.gameweekId !== id);
   state.predictions = state.predictions.filter(p => p.gameweekId !== id);
-  persist(); render();
-};
-
-window.addFixture = gameweekId => {
-  const homeTeam = prompt("Home team", "Millwall");
-  const awayTeam = prompt("Away team", "Preston North End");
-  if (!homeTeam || !awayTeam) return;
-  state.fixtures.push({ id: uid("f"), gameweekId, homeTeam, awayTeam, kickoffAt: nowISO(72), homeScore: null, awayScore: null, resultConfirmed: false, createdAt: new Date().toISOString() });
   persist(); render();
 };
 

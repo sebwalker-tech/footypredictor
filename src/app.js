@@ -141,7 +141,33 @@ function upgradeState(saved) {
     fixture.apiMatchId = fixture.apiMatchId ?? null;
     fixture.status = fixture.status ?? (fixture.resultConfirmed ? "FINISHED" : Date.parse(fixture.kickoffAt) <= Date.now() ? "TIMED" : "SCHEDULED");
   });
+  unlockFutureImportedPredictions(saved);
+  refreshGameweekStatuses(saved);
   return saved;
+}
+
+function unlockFutureImportedPredictions(target) {
+  const now = Date.now();
+  target.predictions.forEach(prediction => {
+    const fixture = target.fixtures.find(item => item.id === prediction.fixtureId);
+    if (fixture && !fixture.resultConfirmed && Date.parse(fixture.kickoffAt) > now) {
+      prediction.isLocked = false;
+      prediction.lockedAt = null;
+    }
+  });
+}
+
+function refreshGameweekStatuses(target) {
+  target.gameweeks.forEach(gameweek => {
+    const fixtures = target.fixtures.filter(fixture => fixture.gameweekId === gameweek.id);
+    if (!fixtures.length) return;
+    if (fixtures.every(fixture => fixture.resultConfirmed)) {
+      gameweek.status = "completed";
+      return;
+    }
+    const hasFutureFixture = fixtures.some(fixture => Date.parse(fixture.kickoffAt) > Date.now());
+    gameweek.status = hasFutureFixture ? "open" : "closed";
+  });
 }
 
 function persist() {
@@ -201,9 +227,9 @@ function lockPastKickoffs(target) {
 }
 
 function canEditPrediction(gameweek, fixture, prediction) {
-  if (gameweek.status !== "open") return false;
-  if (Date.parse(gameweek.closesAt) <= Date.now()) return false;
   if (Date.parse(fixture.kickoffAt) <= Date.now()) return false;
+  if (gameweek.status === "completed") return false;
+  if (Date.parse(gameweek.closesAt) <= Date.now() && Date.parse(fixture.kickoffAt) <= Date.now()) return false;
   return !prediction?.isLocked;
 }
 
@@ -211,8 +237,12 @@ function apiHeaders() {
   return { "X-Auth-Token": state.apiSettings.apiKey.trim() };
 }
 
+function isHostedDeployment() {
+  return location.protocol === "https:" || location.hostname.endsWith(".vercel.app");
+}
+
 function apiConfigured() {
-  return Boolean(state.apiSettings.apiKey?.trim());
+  return Boolean(state.apiSettings.apiKey?.trim()) || isHostedDeployment();
 }
 
 function normaliseTeamName(value) {
@@ -258,6 +288,14 @@ function matchStatusLabel(status) {
 }
 
 async function fetchFootballData(path) {
+  if (isHostedDeployment()) {
+    const response = await fetch(`/api/football-data?path=${encodeURIComponent(path)}`);
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      throw new Error(`${response.status} ${response.statusText}${message ? `: ${message.slice(0, 120)}` : ""}`);
+    }
+    return response.json();
+  }
   const response = await fetch(`${state.apiSettings.baseUrl}${path}`, { headers: apiHeaders() });
   if (!response.ok) {
     const message = await response.text().catch(() => "");
@@ -328,6 +366,7 @@ async function syncFromApi({ silent = false } = {}) {
     ]);
     const fixturesUpdated = applyApiMatches(matchesData.matches ?? []);
     const tableRows = applyApiStandings(standingsData.standings ?? []);
+    refreshGameweekStatuses(state);
     state.apiSettings.lastSyncAt = new Date().toISOString();
     state.apiSettings.lastSyncStatus = `Synced ${fixturesUpdated} fixture score${fixturesUpdated === 1 ? "" : "s"} and ${tableRows} table rows`;
     persist();
@@ -562,13 +601,14 @@ function renderPredictions(user) {
   const selected = state.gameweeks.find(g => g.id === selectedGameweekId) ?? selectableGameweeks[0] ?? state.gameweeks[0];
   selectedGameweekId = selected?.id;
   const fixtures = state.fixtures.filter(f => f.gameweekId === selected?.id);
+  const hasEditableFixture = fixtures.some(fixture => canEditPrediction(selected, fixture, state.predictions.find(p => p.userId === user.id && p.fixtureId === fixture.id)));
   return `
     <section class="section">
       <div class="toolbar">
         <div class="tabs">
           ${selectableGameweeks.map(g => `<button class="tab ${selectedGameweekId === g.id ? "active" : ""}" onclick="setSelectedGameweek('${g.id}')">${g.name}</button>`).join("")}
         </div>
-        <button class="primary" onclick="submitAll('${selectedGameweekId}')" ${selected?.status === "open" ? "" : "disabled"}>Submit All</button>
+        <button class="primary" onclick="submitAll('${selectedGameweekId}')" ${hasEditableFixture ? "" : "disabled"}>Submit All</button>
       </div>
       ${fixtures.length ? fixtures.map(f => renderPredictionFixture(user, selected, f)).join("") : `<div class="card empty">No fixtures available yet.</div>`}
     </section>
@@ -792,7 +832,7 @@ function renderAdmin() {
           </label>
           <div class="actions">
             <button class="secondary" onclick="saveApiSettings()">Save API settings</button>
-            <span class="chip ${apiConfigured() ? "good" : "warn"}">${apiConfigured() ? "Connected" : "Needs API key"}</span>
+            <span class="chip ${apiConfigured() ? "good" : "warn"}">${isHostedDeployment() ? "Vercel proxy" : apiConfigured() ? "Connected" : "Needs API key"}</span>
           </div>
         </div>
       </div>

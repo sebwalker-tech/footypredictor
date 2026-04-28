@@ -141,10 +141,12 @@ function upgradeState(saved) {
   saved.pointsLedger = saved.pointsLedger ?? [];
   saved.fixtures.forEach(fixture => {
     fixture.apiMatchId = fixture.apiMatchId ?? null;
+    fixture.apiMatchday = fixture.apiMatchday ?? null;
     fixture.status = fixture.status ?? (fixture.resultConfirmed ? "FINISHED" : Date.parse(fixture.kickoffAt) <= Date.now() ? "TIMED" : "SCHEDULED");
   });
   unlockFutureImportedPredictions(saved);
   refreshGameweekStatuses(saved);
+  setCurrentGameweekActive(saved);
   return saved;
 }
 
@@ -170,6 +172,40 @@ function refreshGameweekStatuses(target) {
     const hasFutureFixture = fixtures.some(fixture => Date.parse(fixture.kickoffAt) > Date.now());
     gameweek.status = hasFutureFixture ? "open" : "closed";
   });
+}
+
+function currentGameweek(target = state) {
+  const now = Date.now();
+  const gameweeks = target.gameweeks
+    .map(gameweek => {
+      const fixtures = target.fixtures.filter(fixture => fixture.gameweekId === gameweek.id);
+      const futureFixtures = fixtures.filter(fixture => Date.parse(fixture.kickoffAt) > now);
+      const nextKickoff = Math.min(...futureFixtures.map(fixture => Date.parse(fixture.kickoffAt)));
+      return { gameweek, fixtures, futureFixtures, nextKickoff };
+    })
+    .filter(item => item.fixtures.length);
+
+  const nextFortnight = gameweeks
+    .filter(item => item.futureFixtures.length && item.nextKickoff <= now + 14 * 86400000)
+    .sort((a, b) => b.gameweek.number - a.gameweek.number || a.nextKickoff - b.nextKickoff);
+  if (nextFortnight.length) return nextFortnight[0].gameweek;
+
+  const upcoming = gameweeks
+    .filter(item => item.futureFixtures.length)
+    .sort((a, b) => a.nextKickoff - b.nextKickoff);
+  if (upcoming.length) return upcoming[0].gameweek;
+
+  return gameweeks
+    .filter(item => item.fixtures.some(fixture => fixture.resultConfirmed))
+    .sort((a, b) => b.gameweek.number - a.gameweek.number)[0]?.gameweek ?? target.gameweeks[0];
+}
+
+function setCurrentGameweekActive(target = state) {
+  const active = currentGameweek(target);
+  target.gameweeks.forEach(gameweek => {
+    gameweek.isActive = gameweek.id === active?.id;
+  });
+  return active;
 }
 
 function persist() {
@@ -271,8 +307,13 @@ function sameFixture(localFixture, apiMatch) {
   const localAway = normaliseTeamName(localFixture.awayTeam);
   const apiHome = normaliseTeamName(apiMatch.homeTeam?.name ?? apiMatch.homeTeam?.shortName ?? "");
   const apiAway = normaliseTeamName(apiMatch.awayTeam?.name ?? apiMatch.awayTeam?.shortName ?? "");
+  const teamsMatch = localHome === apiHome && localAway === apiAway;
+  if (!teamsMatch) return false;
+  const localGameweek = state.gameweeks.find(gameweek => gameweek.id === localFixture.gameweekId);
+  if (localGameweek?.number === apiMatch.matchday) return true;
+  if (localFixture.apiMatchId) return false;
   const daysApart = Math.abs(Date.parse(localFixture.kickoffAt) - Date.parse(apiMatch.utcDate ?? 0)) / 86400000;
-  return localHome === apiHome && localAway === apiAway && (daysApart <= 2 || !localFixture.apiMatchId);
+  return daysApart <= 3;
 }
 
 function matchStatusLabel(status) {
@@ -332,6 +373,7 @@ function applyApiMatches(matches) {
     const localFixture = state.fixtures.find(fixture => sameFixture(fixture, match));
     if (!localFixture) return;
     localFixture.apiMatchId = match.id;
+    localFixture.apiMatchday = match.matchday ?? localFixture.apiMatchday ?? null;
     localFixture.kickoffAt = match.utcDate ?? localFixture.kickoffAt;
     localFixture.status = match.status;
     const home = match.score?.fullTime?.home ?? match.score?.regularTime?.home;
@@ -389,6 +431,9 @@ async function syncFromApi({ silent = false } = {}) {
     const fixturesUpdated = applyApiMatches(matchesData.matches ?? []);
     const tableRows = applyApiStandings(standingsData.standings ?? []);
     refreshGameweekStatuses(state);
+    const active = setCurrentGameweekActive(state);
+    selectedGameweekId = active?.id ?? selectedGameweekId;
+    if (!selectedHistoryGameweekId) selectedHistoryGameweekId = active?.id ?? null;
     state.apiSettings.lastSyncAt = new Date().toISOString();
     state.apiSettings.lastSyncStatus = `Synced ${fixturesUpdated} fixture score${fixturesUpdated === 1 ? "" : "s"} and ${tableRows} table rows`;
     persist();
@@ -495,6 +540,7 @@ function renderAuth() {
 }
 
 function renderShell(user) {
+  const activeGameweek = currentGameweek();
   const title = {
     leaderboard: "Leaderboard",
     predictions: "Predictions",
@@ -512,7 +558,7 @@ function renderShell(user) {
             <div class="brand-mark">CP</div>
             <div>
               <h1>Championship Predictions</h1>
-              <p>${state.gameweeks.find(g => g.isActive)?.name ?? "Season"} active</p>
+              <p>${activeGameweek?.name ?? "Season"} active</p>
             </div>
           </div>
           <nav class="nav">
@@ -616,7 +662,8 @@ function recentForm(userId) {
 
 function renderPredictions(user) {
   const selectableGameweeks = state.gameweeks.filter(g => g.status === "open" || g.status === "closed");
-  const selected = state.gameweeks.find(g => g.id === selectedGameweekId) ?? selectableGameweeks[0] ?? state.gameweeks[0];
+  const active = currentGameweek();
+  const selected = state.gameweeks.find(g => g.id === selectedGameweekId) ?? active ?? selectableGameweeks[0] ?? state.gameweeks[0];
   selectedGameweekId = selected?.id;
   const fixtures = state.fixtures.filter(f => f.gameweekId === selected?.id);
   return `
@@ -665,7 +712,7 @@ function renderPredictionFixture(user, gameweek, fixture) {
 function renderResults() {
   const gameweeks = state.gameweeks.filter(g => state.fixtures.some(f => f.gameweekId === g.id));
   const ordered = [...gameweeks].sort((a, b) => b.number - a.number);
-  const selected = ordered.find(g => g.id === selectedResultsGameweekId) ?? ordered[0];
+  const selected = ordered.find(g => g.id === selectedResultsGameweekId) ?? currentGameweek() ?? ordered[0];
   selectedResultsGameweekId = selected?.id ?? null;
   const fixtures = state.fixtures.filter(f => f.gameweekId === selected?.id);
   const players = [...state.users].sort((a, b) => a.fullName.localeCompare(b.fullName));
@@ -788,7 +835,7 @@ function renderHistory(user) {
   const correct = predictions.filter(p => p.pointsAwarded === 1).length;
   const playedWeeks = new Set(predictions.map(p => p.gameweekId)).size || 1;
   const gameweeks = state.gameweeks.filter(g => state.fixtures.some(f => f.gameweekId === g.id));
-  const selected = gameweeks.find(g => g.id === selectedHistoryGameweekId) ?? gameweeks.find(g => g.isActive) ?? gameweeks[0];
+  const selected = gameweeks.find(g => g.id === selectedHistoryGameweekId) ?? currentGameweek() ?? gameweeks[0];
   selectedHistoryGameweekId = selected?.id ?? null;
   const fixtures = state.fixtures.filter(f => f.gameweekId === selected?.id);
   return `
@@ -824,7 +871,7 @@ function renderHistory(user) {
                     <td>${fixtureTeams(fixture)}<p class="muted">${fmtDate(fixture.kickoffAt)}</p></td>
                     <td>${prediction ? `${prediction.predictedHomeScore} - ${prediction.predictedAwayScore}` : `<span class="muted">No prediction</span>`}</td>
                     <td>${fixture.resultConfirmed ? `${fixture.homeScore} - ${fixture.awayScore}` : `<span class="muted">Pending</span>`}</td>
-                    <td>${prediction ? `<span class="chip ${prediction.pointsAwarded === 4 ? "good" : prediction.pointsAwarded === 1 ? "warn" : "bad"}">${prediction.pointsAwarded}${prediction.pointsAwarded === 4 ? " Exact Score" : ""}</span>` : `<span class="muted">-</span>`}</td>
+                    <td>${prediction ? `<span class="chip ${prediction.pointsAwarded === 4 ? "good" : prediction.pointsAwarded === 1 ? "warn" : "bad"}">${prediction.pointsAwarded}</span>` : `<span class="muted">-</span>`}</td>
                   </tr>
                 `;
               }).join("")}

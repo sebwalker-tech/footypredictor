@@ -27,7 +27,7 @@ const teams = ["Leicester City", "Leeds United", "Ipswich Town", "Southampton", 
 
 const state = upgradeState(loadState());
 let currentUserId = state.sessionUserId;
-let currentView = "leaderboard";
+let currentView = "home";
 let selectedGameweekId = state.gameweeks.find(g => g.isActive)?.id ?? state.gameweeks[0]?.id;
 let leaderboardFilter = "overall";
 let selectedResultsGameweekId = null;
@@ -505,6 +505,86 @@ function navItem(view, label, svg) {
   return `<button class="${currentView === view ? "active" : ""}" onclick="setView('${view}')">${svg}<span>${label}</span></button>`;
 }
 
+function PageHeader({ eyebrow, title, subtitle }) {
+  return `
+    <header class="ds-page-header">
+      ${eyebrow ? `<p class="ds-eyebrow">${eyebrow}</p>` : ""}
+      <h2>${title}</h2>
+      ${subtitle ? `<p>${subtitle}</p>` : ""}
+    </header>
+  `;
+}
+
+function BlockCard(content, className = "") {
+  return `<section class="ds-card ${className}">${content}</section>`;
+}
+
+function StatBlock(label, value, meta = "") {
+  return `
+    <div class="ds-stat">
+      <span>${label}</span>
+      <strong>${value}</strong>
+      ${meta ? `<small>${meta}</small>` : ""}
+    </div>
+  `;
+}
+
+function PrimaryButton(label, action, className = "") {
+  return `<button class="ds-primary ${className}" onclick="${action}">${label}</button>`;
+}
+
+function PredictionInput(home = "", away = "", disabled = false) {
+  return `
+    <div class="ds-prediction-input ${disabled ? "disabled" : ""}">
+      <span>${home}</span>
+      <strong>-</strong>
+      <span>${away}</span>
+    </div>
+  `;
+}
+
+function FixtureBlock(fixture, content = "") {
+  return BlockCard(`
+    <div class="ds-fixture-main">
+      ${fixtureTeams(fixture)}
+      <p>${fmtDate(fixture.kickoffAt)}</p>
+    </div>
+    ${content}
+  `, "ds-fixture-block");
+}
+
+function BottomNav(user) {
+  const items = [
+    ["home", "Home", icon.trophy],
+    ["predictions", "Predictions", icon.clipboard],
+    ["leaderboard", "Leaderboard", icon.stats],
+    ["leagues", "Leagues", icon.table],
+    ["profile", "Profile", icon.history]
+  ];
+  return `
+    <nav class="ds-bottom-nav">
+      ${items.map(([view, label, svg]) => `<button class="${currentView === view ? "active" : ""}" onclick="setView('${view}')">${svg}<span>${label}</span></button>`).join("")}
+    </nav>
+  `;
+}
+
+function AppShell({ user, title, subtitle, children }) {
+  const activeGameweek = currentGameweek();
+  return `
+    <div class="ds-app">
+      <main class="ds-main">
+        ${PageHeader({
+          eyebrow: activeGameweek?.name ?? "Championship Predictions",
+          title,
+          subtitle
+        })}
+        ${children}
+      </main>
+      ${BottomNav(user)}
+    </div>
+  `;
+}
+
 function render() {
   persist();
   const user = currentUser();
@@ -542,65 +622,34 @@ function renderAuth() {
 function renderShell(user) {
   const activeGameweek = currentGameweek();
   const title = {
+    home: "Home",
     leaderboard: "Leaderboard",
     predictions: "Predictions",
     results: "Results",
     table: "Championship Table",
+    leagues: "Leagues",
     history: "My History",
+    profile: "Profile",
     admin: "Admin Panel"
   }[currentView];
 
-  return `
-    <div class="app">
-      <div class="shell">
-        <aside class="sidebar">
-          <div class="brand">
-            <div class="brand-mark">CP</div>
-            <div>
-              <h1>Championship Predictions</h1>
-              <p>${activeGameweek?.name ?? "Season"} active</p>
-            </div>
-          </div>
-          <nav class="nav">
-            ${navItem("leaderboard", "Leaderboard", icon.trophy)}
-            ${navItem("predictions", "Predictions", icon.clipboard)}
-            ${navItem("results", "Results", icon.fixture)}
-            ${navItem("table", "Table", icon.table)}
-            ${navItem("history", "My History", icon.history)}
-            ${user.isAdmin ? navItem("admin", "Admin Panel", icon.admin) : ""}
-          </nav>
-          <div class="account-card">
-            <strong>${user.fullName}</strong>
-            <p class="muted">${user.email}</p>
-            <p><span class="chip good">${user.totalPoints} pts</span> ${user.isAdmin ? `<span class="chip warn">Admin</span>` : ""}</p>
-            <button class="ghost" onclick="logout()">Log out</button>
-          </div>
-        </aside>
-        <main class="main">
-          <header class="topbar">
-            <div>
-              <h2>${title}</h2>
-              <p class="muted">${state.apiSettings.lastSyncAt ? `Live data last synced ${fmtDate(state.apiSettings.lastSyncAt)}.` : "Predictions stay editable until 1 hour before kickoff. Exact scores earn 4 points, correct outcomes earn 1."}</p>
-            </div>
-            <div class="actions">
-              <button class="secondary" onclick="syncFromApi()">${icon.sync} Sync Scores</button>
-              <span class="chip good">${user.totalPoints} points</span>
-              <button class="ghost" onclick="logout()">Log out</button>
-            </div>
-          </header>
-          ${renderCurrentView(user)}
-        </main>
-      </div>
-    </div>
-  `;
+  return AppShell({
+    user,
+    title,
+    subtitle: state.apiSettings.lastSyncAt ? `Live data last synced ${fmtDate(state.apiSettings.lastSyncAt)}.` : "Predictions stay editable until 1 hour before kickoff.",
+    children: renderCurrentView(user)
+  });
 }
 
 function renderCurrentView(user) {
+  if (currentView === "home") return renderHome(user);
   if (currentView === "leaderboard") return renderLeaderboard();
   if (currentView === "predictions") return renderPredictions(user);
   if (currentView === "results") return renderResults();
   if (currentView === "table") return renderChampionshipTable();
+  if (currentView === "leagues") return renderChampionshipTable();
   if (currentView === "history") return renderHistory(user);
+  if (currentView === "profile") return renderHistory(user);
   if (currentView === "admin" && user.isAdmin) return renderAdmin();
   return `<section class="card empty">You do not have access to this section.</section>`;
 }
@@ -612,6 +661,69 @@ function rankedUsers(filter = leaderboardFilter) {
       : state.predictions.filter(p => p.userId === user.id && p.gameweekId === filter).reduce((sum, p) => sum + p.pointsAwarded, 0);
     return { ...user, filteredPoints: points };
   }).sort((a, b) => b.filteredPoints - a.filteredPoints || a.fullName.localeCompare(b.fullName));
+}
+
+function userRank(userId) {
+  return rankedUsers("overall").findIndex(user => user.id === userId) + 1;
+}
+
+function renderHome(user) {
+  const active = currentGameweek();
+  const fixtures = state.fixtures
+    .filter(fixture => fixture.gameweekId === active?.id)
+    .sort((a, b) => Date.parse(a.kickoffAt) - Date.parse(b.kickoffAt));
+  const nextFixture = fixtures.find(fixture => Date.parse(fixture.kickoffAt) > Date.now()) ?? fixtures[0];
+  const userPredictions = fixtures.filter(fixture => state.predictions.some(prediction => prediction.userId === user.id && prediction.fixtureId === fixture.id));
+  const editableFixtures = fixtures.filter(fixture => canEditPrediction(active, fixture, state.predictions.find(prediction => prediction.userId === user.id && prediction.fixtureId === fixture.id)));
+  const topThree = rankedUsers("overall").slice(0, 3);
+  const rank = userRank(user.id);
+
+  return `
+    <section class="ds-home">
+      ${BlockCard(`
+        <div>
+          <p class="ds-eyebrow">Your score</p>
+          <div class="ds-hero-number">${user.totalPoints}</div>
+          <p class="ds-muted">points this season</p>
+        </div>
+        <div class="ds-hero-rank">
+          <span>#${rank || "-"}</span>
+          <small>overall rank</small>
+        </div>
+      `, "ds-hero-card")}
+
+      <div class="ds-stat-grid">
+        ${StatBlock("Predicted", `${userPredictions.length}/${fixtures.length || 0}`, active?.name ?? "Current week")}
+        ${StatBlock("Open", editableFixtures.length, "fixtures to play")}
+      </div>
+
+      ${nextFixture ? FixtureBlock(nextFixture, `
+        <div class="ds-fixture-footer">
+          <span>${predictionDeadlineLabel(nextFixture)}</span>
+          ${PrimaryButton("Make predictions", "setView('predictions')")}
+        </div>
+      `) : BlockCard(`<p class="ds-muted">No active fixtures are available yet.</p>`)}
+
+      ${BlockCard(`
+        <div class="ds-block-heading">
+          <div>
+            <p class="ds-eyebrow">Leaderboard</p>
+            <h3>Top players</h3>
+          </div>
+          <button class="ds-text-button" onclick="setView('leaderboard')">View all</button>
+        </div>
+        <div class="ds-mini-list">
+          ${topThree.map((player, index) => `
+            <button onclick="openPlayer('${player.id}')">
+              <span>${index + 1}</span>
+              <strong>${player.fullName}</strong>
+              <em>${player.totalPoints}</em>
+            </button>
+          `).join("")}
+        </div>
+      `)}
+    </section>
+  `;
 }
 
 function renderLeaderboard() {

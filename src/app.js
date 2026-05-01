@@ -685,6 +685,7 @@ function renderHome(user) {
   const userPredictions = fixtures.filter(fixture => state.predictions.some(prediction => prediction.userId === user.id && prediction.fixtureId === fixture.id));
   const editableFixtures = fixtures.filter(fixture => canEditPrediction(active, fixture, state.predictions.find(prediction => prediction.userId === user.id && prediction.fixtureId === fixture.id)));
   const topThree = rankedUsers("overall").slice(0, 3);
+  const podiumOrder = [topThree[1], topThree[0], topThree[2]].filter(Boolean);
   const rank = userRank(user.id);
 
   return `
@@ -717,18 +718,21 @@ function renderHome(user) {
         <div class="ds-block-heading">
           <div>
             <p class="ds-eyebrow">Leaderboard</p>
-            <h3>Top players</h3>
+            <h3>Top 3 podium</h3>
           </div>
           <button class="ds-text-button" onclick="setView('leaderboard')">View all</button>
         </div>
-        <div class="ds-mini-list">
-          ${topThree.map((player, index) => `
-            <button onclick="openPlayer('${player.id}')">
-              <span>${index + 1}</span>
+        <div class="ds-podium">
+          ${podiumOrder.map(player => {
+            const place = topThree.findIndex(item => item.id === player.id) + 1;
+            return `
+            <button class="ds-podium-player place-${place}" onclick="openPlayer('${player.id}')">
+              <span>${place}</span>
               <strong>${player.fullName}</strong>
-              <em>${player.totalPoints}</em>
+              <em>${player.totalPoints} pts</em>
             </button>
-          `).join("")}
+          `;
+          }).join("")}
         </div>
       `)}
     </section>

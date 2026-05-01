@@ -351,6 +351,75 @@ button:disabled {
   font-weight: 950;
 }
 
+.ds-podium {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.ds-podium-player {
+  display: grid;
+  justify-items: center;
+  align-content: end;
+  gap: 8px;
+  min-height: 128px;
+  padding: 14px 8px;
+  border-radius: 22px;
+  background: var(--panel-2);
+  color: var(--text);
+  text-align: center;
+}
+
+.ds-podium-player.place-1 {
+  min-height: 168px;
+  background: var(--text);
+  color: var(--panel);
+  order: 2;
+}
+
+.ds-podium-player.place-2 {
+  min-height: 142px;
+  order: 1;
+}
+
+.ds-podium-player.place-3 {
+  order: 3;
+}
+
+.ds-podium-player span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 1.25rem;
+  font-weight: 950;
+}
+
+.ds-podium-player.place-1 span {
+  background: var(--accent);
+}
+
+.ds-podium-player strong {
+  max-width: 100%;
+  font-size: 0.9rem;
+  line-height: 1.05;
+}
+
+.ds-podium-player em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.ds-podium-player.place-1 em {
+  color: rgba(255, 255, 255, 0.7);
+}
+
 .ds-bottom-nav {
   position: fixed;
   left: max(12px, env(safe-area-inset-left));

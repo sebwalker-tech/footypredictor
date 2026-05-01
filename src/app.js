@@ -1,6 +1,8 @@
 import { importedSeasonData } from "./importedSeason.js";
+import { getActiveSupabaseProfile, signInWithSupabase, signOutOfSupabase, supabaseConfigured } from "./supabaseClient.js";
 
 const STORAGE_KEY = "championship-predictions-state-v1";
+const USE_SUPABASE_AUTH = supabaseConfigured();
 const DEFAULT_API_SETTINGS = {
   provider: "football-data.org",
   baseUrl: "https://api.football-data.org/v4",
@@ -26,7 +28,8 @@ const icon = {
 const teams = ["Leicester City", "Leeds United", "Ipswich Town", "Southampton", "West Brom", "Norwich City", "Hull City", "Coventry City", "Middlesbrough", "Sunderland", "Watford", "Bristol City"];
 
 const state = upgradeState(loadState());
-let currentUserId = state.sessionUserId;
+let authReady = !USE_SUPABASE_AUTH;
+let currentUserId = USE_SUPABASE_AUTH ? null : state.sessionUserId;
 let currentView = "home";
 let selectedGameweekId = state.gameweeks.find(g => g.isActive)?.id ?? state.gameweeks[0]?.id;
 let leaderboardFilter = "overall";
@@ -477,6 +480,55 @@ function currentUser() {
   return state.users.find(user => user.id === currentUserId);
 }
 
+function applySupabaseProfile(profile) {
+  if (!profile) {
+    currentUserId = null;
+    state.sessionUserId = null;
+    return null;
+  }
+
+  const email = profile.email?.toLowerCase();
+  let user = state.users.find(u => u.id === profile.app_user_id) ||
+    state.users.find(u => u.email?.toLowerCase() === email);
+
+  if (!user) {
+    user = {
+      id: profile.app_user_id,
+      fullName: profile.full_name || email?.split("@")[0] || "Player",
+      email: profile.email || "",
+      password: "",
+      isAdmin: Boolean(profile.is_admin),
+      totalPoints: 0,
+      createdAt: new Date().toISOString()
+    };
+    state.users.push(user);
+  }
+
+  user.fullName = profile.full_name || user.fullName;
+  user.email = profile.email || user.email;
+  user.isAdmin = Boolean(profile.is_admin);
+  currentUserId = user.id;
+  state.sessionUserId = user.id;
+  return user;
+}
+
+async function restoreSupabaseSession() {
+  if (!USE_SUPABASE_AUTH) return;
+
+  try {
+    const profile = await getActiveSupabaseProfile();
+    applySupabaseProfile(profile);
+  } catch (error) {
+    console.warn("Supabase session restore failed", error);
+    currentUserId = null;
+    state.sessionUserId = null;
+  } finally {
+    authReady = true;
+    persist();
+    render();
+  }
+}
+
 function gameweekName(id) {
   return state.gameweeks.find(g => g.id === id)?.name ?? "Gameweek";
 }
@@ -610,12 +662,45 @@ function AppShell({ user, title, subtitle, children }) {
 
 function render() {
   persist();
+  if (!authReady) {
+    document.getElementById("app").innerHTML = renderAuthLoading();
+    return;
+  }
   const user = currentUser();
   document.getElementById("app").innerHTML = user ? renderShell(user) : renderAuth();
   if (modal) document.getElementById("app").insertAdjacentHTML("beforeend", modal);
 }
 
+function renderAuthLoading() {
+  return `
+    <main class="auth">
+      <section class="card auth-panel">
+        <div class="brand">
+          <div class="brand-mark">CP</div>
+          <div>
+            <h1>Championship Predictions</h1>
+            <p>Checking your league login...</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  `;
+}
+
 function renderAuth() {
+  const authTabs = USE_SUPABASE_AUTH ? "" : `
+    <div class="tabs" style="margin-bottom: 14px">
+      <button class="tab active" id="login-tab" onclick="toggleAuth('login')">Log in</button>
+      <button class="tab" id="signup-tab" onclick="toggleAuth('signup')">Sign up</button>
+    </div>
+  `;
+  const signupField = USE_SUPABASE_AUTH ? "" : `<label class="signup-only" style="display:none">Full name<input name="fullName" autocomplete="name" /></label>`;
+  const emailValue = USE_SUPABASE_AUTH ? "" : "admin@league.test";
+  const passwordValue = USE_SUPABASE_AUTH ? "" : "password";
+  const helperText = USE_SUPABASE_AUTH
+    ? "Use the email and password created for your league account."
+    : "Demo admin: admin@league.test / password";
+
   return `
     <main class="auth">
       <section class="card auth-panel">
@@ -626,16 +711,13 @@ function renderAuth() {
             <p>Private EFL Championship prediction league</p>
           </div>
         </div>
-        <div class="tabs" style="margin-bottom: 14px">
-          <button class="tab active" id="login-tab" onclick="toggleAuth('login')">Log in</button>
-          <button class="tab" id="signup-tab" onclick="toggleAuth('signup')">Sign up</button>
-        </div>
+        ${authTabs}
         <form class="form" onsubmit="submitAuth(event)" data-mode="login">
-          <label class="signup-only" style="display:none">Full name<input name="fullName" autocomplete="name" /></label>
-          <label>Email<input name="email" type="email" autocomplete="email" required value="admin@league.test" /></label>
-          <label>Password<input name="password" type="password" autocomplete="current-password" required value="password" /></label>
-          <button class="primary" type="submit">Continue</button>
-          <p class="muted">Demo admin: admin@league.test / password</p>
+          ${signupField}
+          <label>Email<input name="email" type="email" autocomplete="email" required value="${emailValue}" /></label>
+          <label>Password<input name="password" type="password" autocomplete="current-password" required value="${passwordValue}" /></label>
+          <button class="primary" type="submit">Log in</button>
+          <p class="muted">${helperText}</p>
         </form>
       </section>
     </main>
@@ -1168,6 +1250,7 @@ function renderAdmin() {
 }
 
 window.toggleAuth = mode => {
+  if (USE_SUPABASE_AUTH) return;
   const form = document.querySelector("form.form");
   form.dataset.mode = mode;
   document.querySelectorAll(".signup-only").forEach(el => el.style.display = mode === "signup" ? "grid" : "none");
@@ -1175,12 +1258,26 @@ window.toggleAuth = mode => {
   document.getElementById("signup-tab").classList.toggle("active", mode === "signup");
 };
 
-window.submitAuth = event => {
+window.submitAuth = async event => {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
   const email = data.get("email").trim().toLowerCase();
   const password = data.get("password");
+
+  if (USE_SUPABASE_AUTH) {
+    try {
+      const profile = await signInWithSupabase(email, password);
+      applySupabaseProfile(profile);
+      persist();
+      showToast("Logged in");
+      render();
+    } catch (error) {
+      alert(error.message || "Could not log in.");
+    }
+    return;
+  }
+
   if (form.dataset.mode === "signup") {
     if (state.users.some(u => u.email.toLowerCase() === email)) return alert("That email is already registered.");
     const user = { id: uid("u"), fullName: data.get("fullName") || email.split("@")[0], email, password, isAdmin: false, totalPoints: 0, createdAt: new Date().toISOString() };
@@ -1196,7 +1293,14 @@ window.submitAuth = event => {
   render();
 };
 
-window.logout = () => {
+window.logout = async () => {
+  if (USE_SUPABASE_AUTH) {
+    try {
+      await signOutOfSupabase();
+    } catch (error) {
+      console.warn("Supabase logout failed", error);
+    }
+  }
   currentUserId = null;
   state.sessionUserId = null;
   persist();
@@ -1349,3 +1453,4 @@ window.removePlayer = id => {
 
 startAutoSync();
 render();
+restoreSupabaseSession();

@@ -200,6 +200,19 @@ function currentGameweek(target = state) {
     .sort((a, b) => b.gameweek.number - a.gameweek.number)[0]?.gameweek ?? target.gameweeks[0];
 }
 
+function previousResultsGameweek(target = state) {
+  const active = currentGameweek(target);
+  const activeNumber = active?.number ?? Infinity;
+  return target.gameweeks
+    .filter(gameweek => {
+      if (gameweek.number >= activeNumber) return false;
+      return target.fixtures.some(fixture => fixture.gameweekId === gameweek.id && fixture.resultConfirmed);
+    })
+    .sort((a, b) => b.number - a.number)[0] ?? target.gameweeks
+    .filter(gameweek => target.fixtures.some(fixture => fixture.gameweekId === gameweek.id && fixture.resultConfirmed))
+    .sort((a, b) => b.number - a.number)[0] ?? active;
+}
+
 function setCurrentGameweekActive(target = state) {
   const active = currentGameweek(target);
   target.gameweeks.forEach(gameweek => {
@@ -566,6 +579,7 @@ function BottomNav(user) {
   const items = [
     ["home", "Home", icon.trophy],
     ["predictions", "Predictions", icon.clipboard],
+    ["results", "Results", icon.fixture],
     ["leaderboard", "Leaderboard", icon.stats],
     ["leagues", "Leagues", icon.table],
     ["profile", "Profile", icon.history]
@@ -841,13 +855,23 @@ function renderPredictionFixture(user, gameweek, fixture) {
 function renderResults() {
   const gameweeks = state.gameweeks.filter(g => state.fixtures.some(f => f.gameweekId === g.id));
   const ordered = [...gameweeks].sort((a, b) => b.number - a.number);
-  const selected = ordered.find(g => g.id === selectedResultsGameweekId) ?? currentGameweek() ?? ordered[0];
+  const selected = ordered.find(g => g.id === selectedResultsGameweekId) ?? previousResultsGameweek() ?? ordered[0];
   selectedResultsGameweekId = selected?.id ?? null;
   const fixtures = state.fixtures.filter(f => f.gameweekId === selected?.id);
   const players = [...state.users].sort((a, b) => a.fullName.localeCompare(b.fullName));
   return `
     <section class="section">
       ${selected ? `
+        ${BlockCard(`
+          <div class="ds-block-heading">
+            <div>
+              <p class="ds-eyebrow">Shared scores</p>
+              <h3>${selected.name}</h3>
+            </div>
+            <span class="ds-pill">${fixtures.filter(fixture => fixture.resultConfirmed).length}/${fixtures.length} played</span>
+          </div>
+          <p class="ds-muted">See every player’s prediction, points, and the match result for the selected week.</p>
+        `)}
         <div class="toolbar">
           <div class="gameweek-picker compact">
             <label>Results gameweek

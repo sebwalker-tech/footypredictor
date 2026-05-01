@@ -429,7 +429,8 @@ button:disabled {
   max-width: 100%;
   font-size: 0.9rem;
   line-height: 1.05;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .ds-podium-player em {
@@ -770,7 +771,8 @@ button:disabled {
 .leader-row > div,
 .leader-row strong {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .leader-row.top-1 { border-color: rgba(246, 196, 83, 0.55); background: rgba(246, 196, 83, 0.18); }
@@ -806,7 +808,8 @@ button:disabled {
 
 .teams strong {
   font-size: 1.08rem;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .score-inputs {
@@ -952,12 +955,21 @@ button:disabled {
   gap: 10px;
   min-width: 190px;
   max-width: 100%;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .team-cell.mini {
   min-width: 0;
-  flex: 1 1 0;
+  flex: 0 1 auto;
+  max-width: min(190px, 100%);
+}
+
+.team-cell strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .team-cell img, .crest-fallback {
@@ -984,6 +996,10 @@ button:disabled {
   gap: 8px;
   min-width: 0;
   max-width: 100%;
+}
+
+.result-matrix .fixture-teams {
+  flex-wrap: nowrap;
 }
 
 .fixture-teams .versus {

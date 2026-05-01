@@ -533,7 +533,16 @@ function PrimaryButton(label, action, className = "") {
   return `<button class="ds-primary ${className}" onclick="${action}">${label}</button>`;
 }
 
-function PredictionInput(home = "", away = "", disabled = false) {
+function PredictionInput(home = "", away = "", disabled = false, fixtureId = "") {
+  if (fixtureId) {
+    return `
+      <div class="ds-prediction-input ${disabled ? "disabled" : ""}">
+        <input id="home-${fixtureId}" type="number" min="0" max="20" value="${home}" onchange="savePrediction('${fixtureId}')" ${disabled ? "disabled" : ""} />
+        <strong>-</strong>
+        <input id="away-${fixtureId}" type="number" min="0" max="20" value="${away}" onchange="savePrediction('${fixtureId}')" ${disabled ? "disabled" : ""} />
+      </div>
+    `;
+  }
   return `
     <div class="ds-prediction-input ${disabled ? "disabled" : ""}">
       <span>${home}</span>
@@ -778,19 +787,35 @@ function renderPredictions(user) {
   const selected = state.gameweeks.find(g => g.id === selectedGameweekId) ?? active ?? selectableGameweeks[0] ?? state.gameweeks[0];
   selectedGameweekId = selected?.id;
   const fixtures = state.fixtures.filter(f => f.gameweekId === selected?.id);
+  const savedCount = fixtures.filter(fixture => state.predictions.some(prediction => prediction.userId === user.id && prediction.fixtureId === fixture.id)).length;
+  const openCount = fixtures.filter(fixture => canEditPrediction(selected, fixture, state.predictions.find(prediction => prediction.userId === user.id && prediction.fixtureId === fixture.id))).length;
   return `
-    <section class="section">
-      <div class="toolbar">
-        <div class="gameweek-picker compact">
-          <label>Gameweek
-            <select onchange="setSelectedGameweek(this.value)">
-              ${selectableGameweeks.map(g => `<option value="${g.id}" ${selectedGameweekId === g.id ? "selected" : ""}>${g.name}</option>`).join("")}
-            </select>
-          </label>
+    <section class="ds-predictions">
+      ${BlockCard(`
+        <div class="ds-block-heading">
+          <div>
+            <p class="ds-eyebrow">Gameweek</p>
+            <h3>${selected?.name ?? "Fixtures"}</h3>
+          </div>
+          <span class="ds-pill">${openCount} available</span>
         </div>
-        <span class="chip warn">Auto-saves until 1 hour before kickoff</span>
+        <label class="ds-select-label">
+          <span>Choose week</span>
+          <select onchange="setSelectedGameweek(this.value)">
+            ${selectableGameweeks.map(g => `<option value="${g.id}" ${selectedGameweekId === g.id ? "selected" : ""}>${g.name}</option>`).join("")}
+          </select>
+        </label>
+        <p class="ds-muted">Scores save automatically once both boxes are filled. Edits close 1 hour before each kickoff.</p>
+      `, "ds-prediction-summary")}
+
+      <div class="ds-stat-grid">
+        ${StatBlock("Saved", `${savedCount}/${fixtures.length || 0}`, "predictions")}
+        ${StatBlock("Open", openCount, "editable")}
       </div>
-      ${fixtures.length ? fixtures.map(f => renderPredictionFixture(user, selected, f)).join("") : `<div class="card empty">No fixtures available yet.</div>`}
+
+      <div class="ds-fixture-list">
+        ${fixtures.length ? fixtures.map(f => renderPredictionFixture(user, selected, f)).join("") : BlockCard(`<p class="ds-muted">No fixtures available yet.</p>`)}
+      </div>
     </section>
   `;
 }
@@ -800,25 +825,13 @@ function renderPredictionFixture(user, gameweek, fixture) {
   const editable = canEditPrediction(gameweek, fixture, prediction);
   const locked = !editable;
   const statusLabel = editable ? "Open" : prediction ? "Prediction set" : "Closed";
-  return `
-    <article class="card fixture">
-      <div class="teams">
-        ${fixtureTeams(fixture)}
-        <p class="muted">${fmtDate(fixture.kickoffAt)} · ${predictionDeadlineLabel(fixture)}</p>
-        <div class="actions">
-          <span class="chip ${locked ? "good" : "warn"}">${locked ? icon.lock : ""}${statusLabel}</span>
-          <span class="chip">${gameweek.status}</span>
-        </div>
-      </div>
-      <div class="actions">
-        <div class="score-inputs">
-          <input id="home-${fixture.id}" type="number" min="0" max="20" value="${prediction?.predictedHomeScore ?? ""}" onchange="savePrediction('${fixture.id}')" ${editable ? "" : "disabled"} />
-          <strong>-</strong>
-          <input id="away-${fixture.id}" type="number" min="0" max="20" value="${prediction?.predictedAwayScore ?? ""}" onchange="savePrediction('${fixture.id}')" ${editable ? "" : "disabled"} />
-        </div>
-      </div>
-    </article>
-  `;
+  return FixtureBlock(fixture, `
+    <div class="ds-prediction-meta">
+      <span class="ds-pill ${locked ? "locked" : ""}">${statusLabel}</span>
+      <span>${predictionDeadlineLabel(fixture)}</span>
+    </div>
+    ${PredictionInput(prediction?.predictedHomeScore ?? "", prediction?.predictedAwayScore ?? "", !editable, fixture.id)}
+  `);
 }
 
 function renderResults() {
@@ -1188,7 +1201,7 @@ window.openPlayer = userId => {
   modal = `
     <div class="modal-backdrop" onclick="closeModal(event)">
       <section class="modal card-pad" onclick="event.stopPropagation()">
-        <div class="line-row"><div><h2>${user.fullName}</h2><p class="muted">${user.totalPoints} total points</p></div><button class="ghost" onclick="modal=null;render()">Close</button></div>
+        <div class="line-row"><div><h2>${user.fullName}</h2><p class="muted">${user.totalPoints} total points</p></div><button class="ghost" onclick="closeModal()">Close</button></div>
         <div class="actions">${weekly}</div>
         <table class="prediction-table"><thead><tr><th>Week</th><th>Fixture</th><th>Prediction</th><th>Actual</th><th>Pts</th></tr></thead><tbody>${rows || `<tr><td colspan="5">No prediction history yet.</td></tr>`}</tbody></table>
       </section>
@@ -1196,7 +1209,11 @@ window.openPlayer = userId => {
   render();
 };
 
-window.closeModal = () => { modal = null; render(); };
+window.closeModal = event => {
+  if (event && event.target !== event.currentTarget) return;
+  modal = null;
+  render();
+};
 
 window.updateGameweekStatus = (id, status) => {
   const gw = state.gameweeks.find(g => g.id === id);

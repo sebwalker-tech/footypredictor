@@ -98,6 +98,11 @@ button:disabled {
   gap: var(--gap);
 }
 
+.ds-predictions {
+  display: grid;
+  gap: var(--gap);
+}
+
 .ds-hero-card {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
@@ -190,6 +195,65 @@ button:disabled {
   font-weight: 800;
 }
 
+.ds-fixture-list {
+  display: grid;
+  gap: var(--gap);
+}
+
+.ds-prediction-summary {
+  gap: 16px;
+}
+
+.ds-select-label {
+  display: grid;
+  gap: 8px;
+}
+
+.ds-select-label span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.ds-select-label select {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 900;
+}
+
+.ds-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(37, 194, 110, 0.16);
+  color: #126b3d;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.ds-pill.locked {
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
+.ds-prediction-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
 .ds-primary {
   width: 100%;
   min-height: 52px;
@@ -200,7 +264,7 @@ button:disabled {
 }
 
 .ds-prediction-input {
-  display: inline-grid;
+  display: grid;
   grid-template-columns: 44px auto 44px;
   align-items: center;
   justify-content: center;
@@ -210,6 +274,27 @@ button:disabled {
   border-radius: 999px;
   background: var(--panel-2);
   font-weight: 950;
+}
+
+.ds-prediction-input input {
+  width: 44px;
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: center;
+  font-size: 1.35rem;
+  font-weight: 950;
+}
+
+.ds-prediction-input.disabled {
+  opacity: 0.62;
+}
+
+.ds-prediction-input input:disabled {
+  opacity: 1;
 }
 
 .ds-block-heading {

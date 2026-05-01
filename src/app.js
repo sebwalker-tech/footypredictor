@@ -1,7 +1,8 @@
 import { importedSeasonData } from "./importedSeason.js";
-import { getActiveSupabaseProfile, signInWithSupabase, signOutOfSupabase, supabaseConfigured } from "./supabaseClient.js";
+import { getActiveSupabaseProfile, initSupabaseClient, signInWithSupabase, signOutOfSupabase, supabaseConfigured } from "./supabaseClient.js";
 
 const STORAGE_KEY = "championship-predictions-state-v1";
+await initSupabaseClient();
 const USE_SUPABASE_AUTH = supabaseConfigured();
 const DEFAULT_API_SETTINGS = {
   provider: "football-data.org",

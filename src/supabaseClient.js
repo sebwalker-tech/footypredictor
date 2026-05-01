@@ -1,18 +1,46 @@
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./supabaseConfig.js";
 
-export function supabaseConfigured() {
+let supabaseUrl = SUPABASE_URL;
+let supabaseAnonKey = SUPABASE_ANON_KEY;
+
+export let supabase = null;
+
+function hasSupabaseKeys() {
   return Boolean(
-    SUPABASE_URL &&
-    SUPABASE_ANON_KEY &&
-    SUPABASE_URL.startsWith("https://") &&
-    SUPABASE_ANON_KEY.length > 20 &&
+    supabaseUrl &&
+    supabaseAnonKey &&
+    supabaseUrl.startsWith("https://") &&
+    supabaseAnonKey.length > 20 &&
     window.supabase?.createClient
   );
 }
 
-export const supabase = supabaseConfigured()
-  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null;
+async function loadRuntimeConfig() {
+  if (SUPABASE_URL && SUPABASE_ANON_KEY) return;
+  if (!location.hostname.endsWith(".vercel.app") && location.protocol !== "https:") return;
+
+  try {
+    const response = await fetch("/api/supabase-config");
+    if (!response.ok) return;
+    const config = await response.json();
+    supabaseUrl = config.supabaseUrl || supabaseUrl;
+    supabaseAnonKey = config.supabaseAnonKey || supabaseAnonKey;
+  } catch (error) {
+    console.warn("Supabase runtime config could not be loaded", error);
+  }
+}
+
+export async function initSupabaseClient() {
+  await loadRuntimeConfig();
+  supabase = hasSupabaseKeys()
+    ? window.supabase.createClient(supabaseUrl, supabaseAnonKey)
+    : null;
+  return Boolean(supabase);
+}
+
+export function supabaseConfigured() {
+  return Boolean(supabase);
+}
 
 export async function loadSupabaseProfile(user) {
   if (!supabase || !user) return null;

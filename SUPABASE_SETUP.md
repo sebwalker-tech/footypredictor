@@ -34,7 +34,16 @@ Use the existing app player id for `app_user_id`. This keeps imported historical
 
 ## 4. Add your public Supabase keys
 
-Copy your project URL and publishable/anon key into:
+If you are deploying on Vercel, add these environment variables to the project:
+
+```txt
+SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+SUPABASE_ANON_KEY=YOUR-PUBLISHABLE-OR-ANON-KEY
+```
+
+The app loads these through `/api/supabase-config` at runtime.
+
+For local file testing, you can alternatively copy your project URL and publishable/anon key into:
 
 ```js
 // src/supabaseConfig.js

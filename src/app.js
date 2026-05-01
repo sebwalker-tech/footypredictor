@@ -892,12 +892,12 @@ function renderResults() {
                 <tr>
                   <th>Fixture</th>
                   <th>Actual</th>
-                  <th>Status</th>
                   ${players.map(player => `<th>${player.fullName}</th>`).join("")}
                 </tr>
               </thead>
               <tbody>
                 ${fixtures.map(fixture => renderResultFixtureRow(fixture, players)).join("")}
+                ${renderResultTotalsRow(fixtures, players)}
               </tbody>
             </table>
           </div>
@@ -909,20 +909,37 @@ function renderResults() {
 
 function renderResultFixtureRow(fixture, players) {
   const score = fixture.resultConfirmed ? `${fixture.homeScore} - ${fixture.awayScore}` : "Pending";
+  const statusClass = fixture.resultConfirmed ? "good" : ["LIVE", "IN_PLAY", "PAUSED"].includes(fixture.status) ? "warn in-play" : "warn";
+  const statusText = fixture.resultConfirmed ? "Finished" : matchStatusLabel(fixture.status);
   return `
     <tr>
       <td>${fixtureTeams(fixture)}<p class="muted">${fmtDate(fixture.kickoffAt)}</p></td>
-      <td><span class="chip ${fixture.resultConfirmed ? "good" : "warn"}">${score}</span></td>
-      <td>${matchStatusLabel(fixture.status)}</td>
+      <td><span class="chip ${statusClass}">${score} · ${statusText}</span></td>
       ${players.map(player => {
         const prediction = state.predictions.find(p => p.userId === player.id && p.fixtureId === fixture.id);
         if (!prediction) return `<td><span class="muted">-</span></td>`;
         return `
           <td>
             <strong>${prediction.predictedHomeScore} - ${prediction.predictedAwayScore}</strong>
-            <span class="chip ${prediction.pointsAwarded === 4 ? "good" : prediction.pointsAwarded === 1 ? "warn" : "bad"}">${prediction.pointsAwarded}${prediction.pointsAwarded === 4 ? " Exact" : ""}</span>
+            <span class="chip ${prediction.pointsAwarded === 4 ? "good" : prediction.pointsAwarded === 1 ? "warn" : "bad"}">${prediction.pointsAwarded}</span>
           </td>
         `;
+      }).join("")}
+    </tr>
+  `;
+}
+
+function renderResultTotalsRow(fixtures, players) {
+  return `
+    <tr class="result-total-row">
+      <td><strong>Total</strong></td>
+      <td><span class="muted">${fixtures.length} fixtures</span></td>
+      ${players.map(player => {
+        const total = fixtures.reduce((sum, fixture) => {
+          const prediction = state.predictions.find(p => p.userId === player.id && p.fixtureId === fixture.id);
+          return sum + (prediction?.pointsAwarded ?? 0);
+        }, 0);
+        return `<td><strong>${total}</strong></td>`;
       }).join("")}
     </tr>
   `;

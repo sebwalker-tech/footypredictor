@@ -55,4 +55,4 @@ The anon key is designed to be public in browser apps. Do not put the Supabase s
 
 ## Current scope
 
-This step adds real user login and admin mapping. The existing prediction/data logic is otherwise unchanged. The next Supabase step is to move predictions into database tables so all users share live prediction data across devices.
+This setup adds real user login, admin mapping, and shared playoff draft picks. The existing weekly prediction/data logic is otherwise unchanged. The next Supabase step is to move weekly predictions into database tables so all users share live prediction data across devices.

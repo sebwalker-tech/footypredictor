@@ -109,6 +109,11 @@ button:disabled {
   gap: var(--gap);
 }
 
+.ds-playoffs {
+  display: grid;
+  gap: var(--gap);
+}
+
 .ds-hero-card {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
@@ -453,7 +458,7 @@ button:disabled {
   width: min(680px, calc(100% - 24px));
   margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 4px;
   padding: 8px;
   background: rgba(255, 255, 255, 0.94);
@@ -1053,6 +1058,176 @@ button:disabled {
 .form-dot.warn { background: rgba(244, 197, 66, 0.24); color: #6f5705; }
 .form-dot.bad { background: rgba(230, 75, 60, 0.12); color: #9e2419; }
 
+.ds-playoff-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gap);
+}
+
+.ds-draft-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ds-draft-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) minmax(88px, auto);
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+}
+
+.ds-draft-row.current {
+  border-color: rgba(37, 194, 110, 0.48);
+  background: rgba(37, 194, 110, 0.1);
+}
+
+.ds-draft-row span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-weight: 950;
+}
+
+.ds-draft-row div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ds-draft-row strong,
+.ds-draft-row em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-draft-row small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.ds-draft-row em {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 900;
+  text-align: right;
+}
+
+.ds-team-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ds-team-pick {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 150px;
+  padding: 14px 10px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: center;
+}
+
+.ds-team-pick.mine {
+  border-color: rgba(37, 194, 110, 0.48);
+  background: rgba(37, 194, 110, 0.12);
+}
+
+.ds-team-pick span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-weight: 950;
+}
+
+.ds-team-pick img,
+.ds-team-pick .crest-fallback {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
+.ds-team-pick strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-team-pick small {
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.ds-bracket {
+  display: grid;
+  gap: 8px;
+}
+
+.ds-bracket-match {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel);
+}
+
+.ds-bracket-match > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.ds-bracket-match > div:first-child > span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ds-bracket-teams {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ds-bracket-teams .team-cell {
+  min-width: 0;
+}
+
+.ds-tbd {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .api-form {
   margin-top: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1241,6 +1416,16 @@ button:disabled {
   .ds-bottom-nav button {
     min-height: 44px;
     font-size: 0.58rem;
+  }
+  .ds-team-pick-grid {
+    grid-template-columns: 1fr;
+  }
+  .ds-draft-row {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+  .ds-draft-row em {
+    grid-column: 2;
+    text-align: left;
   }
   .ds-bottom-nav svg {
     width: 17px;

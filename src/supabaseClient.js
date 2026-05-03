@@ -76,3 +76,26 @@ export async function signOutOfSupabase() {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }
+
+export async function loadSupabasePlayoffPicks() {
+  if (!supabase) return {};
+  const { data, error } = await supabase
+    .from("playoff_picks")
+    .select("user_id, team_name");
+
+  if (error) throw error;
+  return Object.fromEntries((data ?? []).map(row => [row.user_id, row.team_name]));
+}
+
+export async function saveSupabasePlayoffPick(userId, teamName) {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("playoff_picks")
+    .upsert({
+      user_id: userId,
+      team_name: teamName,
+      picked_at: new Date().toISOString()
+    });
+
+  if (error) throw error;
+}

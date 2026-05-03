@@ -1,5 +1,5 @@
 import { importedSeasonData } from "./importedSeason.js";
-import { getActiveSupabaseProfile, initSupabaseClient, signInWithSupabase, signOutOfSupabase, supabaseConfigured } from "./supabaseClient.js";
+import { getActiveSupabaseProfile, initSupabaseClient, loadSupabasePlayoffPicks, saveSupabasePlayoffPick, signInWithSupabase, signOutOfSupabase, supabaseConfigured } from "./supabaseClient.js";
 
 const STORAGE_KEY = "championship-predictions-state-v1";
 await initSupabaseClient();
@@ -23,6 +23,7 @@ const icon = {
   lock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
   stats: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5"/><path d="M9 19V9"/><path d="M14 19v-6"/><path d="M19 19V3"/></svg>`,
   table: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"/><path d="M3 12h18"/><path d="M3 17h18"/><path d="M7 3v18"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>`,
+  bracket: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h6v5H7z"/><path d="M7 15h6v5H7z"/><path d="M13 6.5h4v11h-4"/><path d="M17 12h3"/></svg>`,
   sync: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 16v5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 8V3h-5"/></svg>`
 };
 
@@ -85,6 +86,7 @@ function seedState() {
     pred("p_12", "u_3", "f_3", "gw_1", 1, 3, true)
   ];
   const next = { users, gameweeks, fixtures, predictions, pointsLedger: [], championshipTable: sampleChampionshipTable(), apiSettings: { ...DEFAULT_API_SETTINGS }, sessionUserId: "u_admin" };
+  next.playoffs = { picks: {}, locked: false, updatedAt: null };
   recalculateGameweek(next, "gw_1");
   return next;
 }
@@ -143,6 +145,11 @@ function upgradeState(saved) {
   }
   saved.championshipTable = saved.championshipTable?.length ? saved.championshipTable : sampleChampionshipTable();
   saved.pointsLedger = saved.pointsLedger ?? [];
+  saved.playoffs = {
+    picks: saved.playoffs?.picks ?? {},
+    locked: Boolean(saved.playoffs?.locked),
+    updatedAt: saved.playoffs?.updatedAt ?? null
+  };
   saved.fixtures.forEach(fixture => {
     fixture.apiMatchId = fixture.apiMatchId ?? null;
     fixture.apiMatchday = fixture.apiMatchday ?? null;
@@ -519,6 +526,7 @@ async function restoreSupabaseSession() {
   try {
     const profile = await getActiveSupabaseProfile();
     applySupabaseProfile(profile);
+    if (profile) await refreshSupabasePlayoffPicks();
   } catch (error) {
     console.warn("Supabase session restore failed", error);
     currentUserId = null;
@@ -527,6 +535,16 @@ async function restoreSupabaseSession() {
     authReady = true;
     persist();
     render();
+  }
+}
+
+async function refreshSupabasePlayoffPicks() {
+  if (!USE_SUPABASE_AUTH) return;
+  try {
+    state.playoffs.picks = await loadSupabasePlayoffPicks();
+    state.playoffs.updatedAt = new Date().toISOString();
+  } catch (error) {
+    console.warn("Supabase playoff picks could not be loaded", error);
   }
 }
 
@@ -635,6 +653,7 @@ function BottomNav(user) {
     ["results", "Results", icon.fixture],
     ["leaderboard", "Leaderboard", icon.stats],
     ["leagues", "Leagues", icon.table],
+    ["playoffs", "Playoffs", icon.bracket],
     ["profile", "Profile", icon.history]
   ];
   return `
@@ -734,6 +753,7 @@ function renderShell(user) {
     results: "Results",
     table: "Championship Table",
     leagues: "Leagues",
+    playoffs: "Playoffs",
     history: "My History",
     profile: "Profile",
     admin: "Admin Panel"
@@ -754,6 +774,7 @@ function renderCurrentView(user) {
   if (currentView === "results") return renderResults();
   if (currentView === "table") return renderChampionshipTable();
   if (currentView === "leagues") return renderChampionshipTable();
+  if (currentView === "playoffs") return renderPlayoffs(user);
   if (currentView === "history") return renderHistory(user);
   if (currentView === "profile") return renderHistory(user);
   if (currentView === "admin" && user.isAdmin) return renderAdmin();
@@ -767,6 +788,42 @@ function rankedUsers(filter = leaderboardFilter) {
       : state.predictions.filter(p => p.userId === user.id && p.gameweekId === filter).reduce((sum, p) => sum + p.pointsAwarded, 0);
     return { ...user, filteredPoints: points };
   }).sort((a, b) => b.filteredPoints - a.filteredPoints || a.fullName.localeCompare(b.fullName));
+}
+
+function playoffTeams() {
+  const tableTeams = [...state.championshipTable]
+    .sort((a, b) => a.position - b.position)
+    .slice(2, 8);
+  if (tableTeams.length >= 6) return tableTeams;
+  return sampleChampionshipTable().slice(2, 8);
+}
+
+function playoffDraftOrder() {
+  return [...state.users].sort((a, b) => a.totalPoints - b.totalPoints || a.fullName.localeCompare(b.fullName));
+}
+
+function playoffPickForUser(userId) {
+  return state.playoffs.picks[userId] ?? null;
+}
+
+function playoffPickOwner(teamName) {
+  return state.users.find(user => playoffPickForUser(user.id) === teamName);
+}
+
+function playoffCurrentPicker() {
+  return playoffDraftOrder().find(user => !playoffPickForUser(user.id)) ?? null;
+}
+
+function projectedPlayoffMatches(teams = playoffTeams()) {
+  const [third, fourth, fifth, sixth, seventh, eighth] = teams;
+  return [
+    { stage: "Eliminator", label: "3rd v 8th", home: third, away: eighth },
+    { stage: "Eliminator", label: "4th v 7th", home: fourth, away: seventh },
+    { stage: "Eliminator", label: "5th v 6th", home: fifth, away: sixth },
+    { stage: "Semi-final", label: "Top seed path", home: third, away: fifth },
+    { stage: "Semi-final", label: "Middle seed path", home: fourth, away: sixth },
+    { stage: "Final", label: "Promotion final", home: null, away: null }
+  ];
 }
 
 function userRank(userId) {
@@ -1073,6 +1130,127 @@ function renderChampionshipTable() {
   `;
 }
 
+function renderPlayoffs(user) {
+  const teams = playoffTeams();
+  const draftOrder = playoffDraftOrder();
+  const currentPicker = playoffCurrentPicker();
+  const userPick = playoffPickForUser(user.id);
+  const pickedCount = draftOrder.filter(player => playoffPickForUser(player.id)).length;
+  const isUserTurn = currentPicker?.id === user.id && !state.playoffs.locked;
+  const userDraftSlot = draftOrder.findIndex(player => player.id === user.id) + 1;
+
+  return `
+    <section class="ds-playoffs">
+      ${BlockCard(`
+        <div>
+          <p class="ds-eyebrow">End of season draft</p>
+          <div class="ds-hero-number">${pickedCount}/${draftOrder.length}</div>
+          <p class="ds-muted">playoff teams selected</p>
+        </div>
+        <div class="ds-hero-rank">
+          <span>#${userDraftSlot || "-"}</span>
+          <small>your pick</small>
+        </div>
+      `, "ds-hero-card ds-playoff-hero")}
+
+      ${BlockCard(`
+        <div class="ds-block-heading">
+          <div>
+            <p class="ds-eyebrow">On the clock</p>
+            <h3>${currentPicker ? currentPicker.fullName : "Draft complete"}</h3>
+          </div>
+          <span class="ds-pill ${isUserTurn ? "" : "locked"}">${isUserTurn ? "Your turn" : userPick ? "Picked" : "Waiting"}</span>
+        </div>
+        <p class="ds-muted">${userPick ? `You have ${userPick}.` : currentPicker ? `${currentPicker.fullName} picks next. The order runs from last place to first place.` : "All playoff teams have been selected."}</p>
+      `)}
+
+      <div class="ds-playoff-grid">
+        ${BlockCard(`
+          <div class="ds-block-heading">
+            <div>
+              <p class="ds-eyebrow">Draft board</p>
+              <h3>Reverse leaderboard</h3>
+            </div>
+          </div>
+          <div class="ds-draft-list">
+            ${draftOrder.map((player, index) => {
+              const pick = playoffPickForUser(player.id);
+              return `
+                <div class="ds-draft-row ${player.id === currentPicker?.id ? "current" : ""}">
+                  <span>${index + 1}</span>
+                  <div>
+                    <strong>${player.fullName}</strong>
+                    <small>${player.totalPoints} pts</small>
+                  </div>
+                  <em>${pick || "To pick"}</em>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `)}
+
+        ${BlockCard(`
+          <div class="ds-block-heading">
+            <div>
+              <p class="ds-eyebrow">Teams</p>
+              <h3>Available picks</h3>
+            </div>
+          </div>
+          <div class="ds-team-pick-grid">
+            ${teams.map(team => renderPlayoffTeamPick(team, user, isUserTurn)).join("")}
+          </div>
+        `)}
+      </div>
+
+      ${BlockCard(`
+        <div class="ds-block-heading">
+          <div>
+            <p class="ds-eyebrow">Projected games</p>
+            <h3>Playoff bracket</h3>
+          </div>
+          <span class="ds-pill">${teams.length} teams</span>
+        </div>
+        <div class="ds-bracket">
+          ${projectedPlayoffMatches(teams).map(match => renderPlayoffMatch(match)).join("")}
+        </div>
+      `)}
+    </section>
+  `;
+}
+
+function renderPlayoffTeamPick(team, user, isUserTurn) {
+  const owner = playoffPickOwner(team.teamName);
+  const pickedByUser = owner?.id === user.id;
+  const disabled = Boolean(owner) || !isUserTurn;
+  const label = owner ? owner.fullName : isUserTurn ? "Pick" : "Available";
+  return `
+    <button class="ds-team-pick ${pickedByUser ? "mine" : ""}" onclick="pickPlayoffTeam('${encodeURIComponent(team.teamName)}')" ${disabled ? "disabled" : ""}>
+      <span>${team.position}</span>
+      ${team.crest ? `<img src="${team.crest}" alt="" />` : `<em class="crest-fallback">${team.teamName.slice(0, 2).toUpperCase()}</em>`}
+      <strong>${team.teamName}</strong>
+      <small>${label}</small>
+    </button>
+  `;
+}
+
+function renderPlayoffMatch(match) {
+  const home = match.home ? teamBadge(match.home.teamName) : `<span class="ds-tbd">Winner SF 1</span>`;
+  const away = match.away ? teamBadge(match.away.teamName) : `<span class="ds-tbd">Winner SF 2</span>`;
+  return `
+    <article class="ds-bracket-match">
+      <div>
+        <span>${match.stage}</span>
+        <strong>${match.label}</strong>
+      </div>
+      <div class="ds-bracket-teams">
+        ${home}
+        <span class="versus">v</span>
+        ${away}
+      </div>
+    </article>
+  `;
+}
+
 function renderForm(form) {
   if (!form) return `<span class="muted">-</span>`;
   return form.split(",").slice(-5).map(item => {
@@ -1270,6 +1448,7 @@ window.submitAuth = async event => {
     try {
       const profile = await signInWithSupabase(email, password);
       applySupabaseProfile(profile);
+      await refreshSupabasePlayoffPicks();
       persist();
       showToast("Logged in");
       render();
@@ -1313,6 +1492,27 @@ window.setLeaderboardFilter = filter => { leaderboardFilter = filter; render(); 
 window.setSelectedGameweek = id => { selectedGameweekId = id; render(); };
 window.setSelectedResultsGameweek = id => { selectedResultsGameweekId = id; render(); };
 window.setSelectedHistoryGameweek = id => { selectedHistoryGameweekId = id; render(); };
+
+window.pickPlayoffTeam = async encodedTeamName => {
+  const teamName = decodeURIComponent(encodedTeamName);
+  const currentPicker = playoffCurrentPicker();
+  if (!currentPicker) return alert("The playoff draft is complete.");
+  if (currentPicker.id !== currentUserId) return alert(`${currentPicker.fullName} is next to pick.`);
+  if (playoffPickOwner(teamName)) return alert("That team has already been picked.");
+  if (!confirm(`Pick ${teamName} for the playoff competition?`)) return;
+  try {
+    if (USE_SUPABASE_AUTH) await saveSupabasePlayoffPick(currentUserId, teamName);
+    state.playoffs.picks[currentUserId] = teamName;
+    state.playoffs.updatedAt = new Date().toISOString();
+    persist();
+    showToast(`${teamName} picked`);
+    render();
+  } catch (error) {
+    alert(error.message || "Could not save that playoff pick.");
+    await refreshSupabasePlayoffPicks();
+    render();
+  }
+};
 
 window.savePrediction = fixtureId => {
   const fixture = state.fixtures.find(f => f.id === fixtureId);
